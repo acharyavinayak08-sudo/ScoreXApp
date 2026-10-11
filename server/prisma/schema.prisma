@@ -1,0 +1,201 @@
+// This is your Prisma schema file.
+// Learn more about it: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums (SQLite: stored as strings) ────────────────────────────────────────
+
+// Role enum
+// Prisma SQLite doesn't support native enums; we use String with validation in app
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  uid          String   @unique   // Roll number / Faculty ID
+  email        String   @unique
+  passwordHash String
+  role         String   @default("student") // student | faculty | admin
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  examsCreated     Exam[]              @relation("ExamCreator")
+  attempts         Attempt[]
+  violations       SecurityViolation[]
+  weeklyReports    WeeklyReport[]
+  auditLogs        AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Subject {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  exams Exam[]
+}
+
+model Exam {
+  id               String    @id @default(cuid())
+  title            String
+  subjectId        String
+  createdById      String
+  duration         Int       // in minutes
+  totalMarks       Int       @default(0)
+  passingMarks     Int       @default(0)
+  isPublished      Boolean   @default(false)
+  showAnswersAfter Boolean   @default(true)  // show correct answers after submission
+  maxViolations    Int       @default(3)
+  instructions     String?
+  startDate        DateTime?
+  endDate          DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  subject    Subject    @relation(fields: [subjectId], references: [id])
+  createdBy  User       @relation("ExamCreator", fields: [createdById], references: [id])
+  questions  Question[]
+  attempts   Attempt[]
+
+  @@index([isPublished])
+  @@index([createdById])
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  examId    String
+  text      String
+  order     Int      @default(0)
+  marks     Int      @default(1)
+  createdAt DateTime @default(now())
+
+  // Relations
+  exam            Exam            @relation(fields: [examId], references: [id], onDelete: Cascade)
+  options         Option[]
+  studentAnswers  StudentAnswer[]
+
+  @@index([examId])
+  @@index([examId, order])
+}
+
+model Option {
+  id         String   @id @default(cuid())
+  questionId String
+  text       String
+  isCorrect  Boolean  @default(false)
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  // Relations
+  question       Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  studentAnswers StudentAnswer[]
+
+  @@index([questionId])
+}
+
+model Attempt {
+  id             String    @id @default(cuid())
+  examId         String
+  userId         String
+  startedAt      DateTime  @default(now())
+  submittedAt    DateTime?
+  score          Int       @default(0)
+  totalMarks     Int       @default(0)
+  isPassed       Boolean   @default(false)
+  violationCount Int       @default(0)
+  submittedBy    String    @default("student") // student | timer | violation | admin
+  isCompleted    Boolean   @default(false)
+  timeSpentSecs  Int       @default(0)
+
+  // Relations
+  exam           Exam            @relation(fields: [examId], references: [id])
+  user           User            @relation(fields: [userId], references: [id])
+  studentAnswers StudentAnswer[]
+  violations     SecurityViolation[]
+
+  @@index([userId])
+  @@index([examId])
+  @@index([userId, examId])
+}
+
+model StudentAnswer {
+  id               String  @id @default(cuid())
+  attemptId        String
+  questionId       String
+  selectedOptionId String?  // null if unanswered
+
+  // Relations
+  attempt        Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question       Question @relation(fields: [questionId], references: [id])
+  selectedOption Option?  @relation(fields: [selectedOptionId], references: [id])
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+}
+
+model SecurityViolation {
+  id         String   @id @default(cuid())
+  attemptId  String
+  userId     String
+  type       String   // "tab_switch" | "fullscreen_exit" | "contextmenu" | "shortcut" | "copy" | "paste" | "cut"
+  detail     String?
+  occurredAt DateTime @default(now())
+
+  // Relations
+  attempt Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([attemptId])
+  @@index([userId])
+}
+
+model WeeklyReport {
+  id              String   @id @default(cuid())
+  userId          String
+  weekStart       DateTime
+  weekEnd         DateTime
+  examsAttempted  Int      @default(0)
+  avgScore        Float    @default(0)
+  totalViolations Int      @default(0)
+  bestScore       Float    @default(0)
+  generatedAt     DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, weekStart])
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // "login" | "logout" | "exam_create" | "user_deactivate" etc.
+  entity    String?  // "User" | "Exam" | "Attempt" etc.
+  entityId  String?
+  metadata  String?  // JSON string
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
